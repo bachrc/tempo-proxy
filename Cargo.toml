@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.99"
+axum = "0.8.4"
+clap = { version = "4.5.44", features = ["derive", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+utoipa = { version = "5.4", features = ["axum_extras"] }
+utoipa-axum = "0.2"
