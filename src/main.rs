@@ -29,11 +29,15 @@ struct ServeArgs {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .init();
+    
     let cli = Cli::parse();
 
     match &cli.command {
         Commands::Serve(args) => {
-            println!("Démarrage du serveur sur l'interface : {}", args.interface);
+            tracing::info!("Démarrage du serveur sur l'interface : {}", args.interface);
 
             server::run(&args.interface).await?;
         }

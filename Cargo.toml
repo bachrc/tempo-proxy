@@ -10,3 +10,6 @@ clap = { version = "4.5.44", features = ["derive", "env"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 utoipa = { version = "5.4", features = ["axum_extras"] }
 utoipa-axum = "0.2"
+utoipa-rapidoc = { version = "6.0", features = ["axum"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
