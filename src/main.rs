@@ -1,4 +1,7 @@
+mod cache;
+mod edf_api;
 mod server;
+mod tempo_service;
 
 use clap::{Parser, Subcommand};
 
@@ -29,10 +32,8 @@ struct ServeArgs {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
-    
+    tracing_subscriber::fmt().with_env_filter("info").init();
+
     let cli = Cli::parse();
 
     match &cli.command {
