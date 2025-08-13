@@ -1,8 +1,3 @@
-mod cache;
-mod edf_api;
-mod server;
-mod tempo_service;
-
 use clap::{Parser, Subcommand};
 
 /// Un proxy fictif pour Tempo, configuré via la ligne de commande.
@@ -40,7 +35,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Commands::Serve(args) => {
             tracing::info!("Démarrage du serveur sur l'interface : {}", args.interface);
 
-            server::run(&args.interface).await?;
+            tempo_proxy_api::server::run(&args.interface).await?;
         }
     }
 
