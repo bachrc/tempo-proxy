@@ -4,231 +4,106 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., v1.2.3)'
-        required: true
-        type: string
-      prerelease:
-        description: 'Is this a prerelease?'
-        required: false
-        type: boolean
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Build the web interface first
-  build-web:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'web/package-lock.json'
-
-      - name: Install dependencies
-        run: npm ci
-        working-directory: web
-
-      - name: Build web interface
-        run: npm run build
-        working-directory: web
-
-      - name: Upload web build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-build
-          path: web/build/
-
-  # Build binaries for multiple platforms
-  build:
-    needs: build-web
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: tempo-proxy-linux-amd64
-
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            name: tempo-proxy-linux-amd64-musl
-
+            artifact_name: tempo-proxy-linux-amd64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: tempo-proxy-linux-arm64
-
+            artifact_name: tempo-proxy-linux-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: tempo-proxy-macos-amd64
-
+            artifact_name: tempo-proxy-macos-amd64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: tempo-proxy-macos-arm64
+            artifact_name: tempo-proxy-macos-arm64
 
-    runs-on: ${{ matrix.os }}
-    
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Download web build
-        uses: actions/download-artifact@v4
-        with:
-          name: web-build
-          path: web/build/
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: 'web/package-lock.json'
+          cache-dependency-path: web/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
-        working-directory: web
+      - name: Build web interface
+        run: |
+          cd web
+          npm ci
+          npm run build
 
-      - name: Install Rust
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
-          
-      - name: Configure cross compilation (Linux ARM64)
+      - name: Setup cross-compilation (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
 
-      - name: Cache Cargo dependencies
+      - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ matrix.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} -p tempo-proxy-cli
 
-      - name: Prepare binary (Unix)
+      - name: Strip binary (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: |
-          cp target/${{ matrix.target }}/release/tempo-proxy ${{ matrix.name }}
-          chmod +x ${{ matrix.name }}
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/tempo-proxy
+          else
+            strip target/${{ matrix.target }}/release/tempo-proxy
+          fi
 
+      - name: Create artifact
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/tempo-proxy artifacts/${{ matrix.artifact_name }}
+          chmod +x artifacts/${{ matrix.artifact_name }}
 
-      - name: Upload binary artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/${{ matrix.artifact_name }}
 
-  # Create GitHub release
-  release:
-    needs: [build-web, build]
+  build-docker:
+    name: Build Docker Images
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: List artifacts
-        run: ls -la artifacts/
-
-      - name: Create release
-        uses: softprops/action-gh-release@v1
-        with:
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
-          files: |
-            artifacts/tempo-proxy-linux-amd64/tempo-proxy-linux-amd64
-            artifacts/tempo-proxy-linux-amd64-musl/tempo-proxy-linux-amd64-musl
-            artifacts/tempo-proxy-linux-arm64/tempo-proxy-linux-arm64
-            artifacts/tempo-proxy-macos-amd64/tempo-proxy-macos-amd64
-            artifacts/tempo-proxy-macos-arm64/tempo-proxy-macos-arm64
-          body: |
-            ## Installation
-
-            ### Linux
-            ```bash
-            # AMD64
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-linux-amd64
-            chmod +x tempo-proxy-linux-amd64
-            sudo mv tempo-proxy-linux-amd64 /usr/local/bin/tempo-proxy
-
-            # ARM64
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-linux-arm64
-            chmod +x tempo-proxy-linux-arm64
-            sudo mv tempo-proxy-linux-arm64 /usr/local/bin/tempo-proxy
-            ```
-
-            ### macOS
-            ```bash
-            # Intel Mac
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-macos-amd64
-            chmod +x tempo-proxy-macos-amd64
-            sudo mv tempo-proxy-macos-amd64 /usr/local/bin/tempo-proxy
-
-            # Apple Silicon Mac
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-macos-arm64
-            chmod +x tempo-proxy-macos-arm64
-            sudo mv tempo-proxy-macos-arm64 /usr/local/bin/tempo-proxy
-            ```
-
-            ## Usage
-            
-            ### Binary
-            ```bash
-            tempo-proxy serve --interface 127.0.0.1:8080
-            ```
-
-            ### Docker
-            ```bash
-            docker run -p 8080:8080 ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ```
-
-            Then open http://127.0.0.1:8080 in your browser.
-
-  docker-deu:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # required for publishing Docker images
-      packages: write # required for pushing Docker images
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Login to GitHub Container Registry
+
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -245,50 +120,61 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6.16.0
+        uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-  # Build and publish Docker image
-  # docker:
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: read
-  #     packages: write
-    
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v3
+  create-release:
+    name: Create Release
+    needs: [build-binaries, build-docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  #     - name: Login to GitHub Container Registry
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.actor }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-  #     - name: Extract metadata
-  #       id: meta
-  #       uses: docker/metadata-action@v5
-  #       with:
-  #         images: ghcr.io/${{ github.repository }}
-  #         tags: |
-  #           type=ref,event=tag
-  #           type=raw,value=latest,enable={{is_default_branch}}
+      - name: Display structure of downloaded files
+        run: ls -la artifacts/
 
-  #     - name: Build and push Docker image
-  #       uses: docker/build-push-action@v5
-  #       with:
-  #         context: .
-  #         platforms: linux/amd64,linux/arm64
-  #         push: true
-  #         tags: ${{ steps.meta.outputs.tags }}
-  #         labels: ${{ steps.meta.outputs.labels }}
-  #         cache-from: type=gha
-  #         cache-to: type=gha,mode=max
+      - name: Create release archives
+        run: |
+          cd artifacts
+          for dir in */; do
+            if [ -d "$dir" ]; then
+              cd "$dir"
+              tar -czf "../${dir%/}.tar.gz" *
+              cd ..
+            fi
+          done
+
+      - name: Get tag name
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
