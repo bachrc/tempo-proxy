@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Build stage for Rust binary
-FROM rust:1.75-alpine AS rust-builder
+FROM rust:1.89-alpine AS rust-builder
 WORKDIR /app
 
 # Install build dependencies
