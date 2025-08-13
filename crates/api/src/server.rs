@@ -8,7 +8,7 @@ use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_rapidoc::RapiDoc;
 
-use crate::{cache, tempo_service, edf_api};
+use crate::{cache, tempo_service};
 use include_dir::{include_dir, Dir};
 
 static WEB_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/build");
@@ -69,10 +69,10 @@ async fn bonjour() -> &'static str {
 async fn calendar_today(
     axum::extract::State(cache): axum::extract::State<cache::TempoCache>
 ) -> impl IntoResponse {
-    let today = Local::now();
+    let today = Local::now().date_naive();
     let today_str = today.format("%Y-%m-%d").to_string();
 
-    match tempo_service::get_tempo_status_for_date(&cache, &today_str).await {
+    match tempo_service::get_tempo_status_for_date(&cache, today).await {
         Ok(status) => (
             StatusCode::OK,
             Json(CalendarResponse {
@@ -108,81 +108,29 @@ async fn calendar_full(
     let tomorrow = today + chrono::Duration::days(1);
     let tomorrow_str = tomorrow.format("%Y-%m-%d").to_string();
 
-    // Vérifier le cache pour les deux dates
-    let today_cached = cache::get_from_cache(&cache, &today_str).await;
-    let tomorrow_cached = cache::get_from_cache(&cache, &tomorrow_str).await;
-
-    match (today_cached, tomorrow_cached) {
-        (Some(today_status), Some(tomorrow_status)) => {
-            // Les deux dates sont en cache
-            (
-                StatusCode::OK,
-                Json(CalendarFullResponse {
-                    today: CalendarResponse {
-                        date: today_str,
-                        statut: today_status,
-                    },
-                    tomorrow: CalendarResponse {
-                        date: tomorrow_str,
-                        statut: tomorrow_status,
-                    },
-                }),
-            )
-                .into_response()
-        }
-        _ => {
-            // Au moins une date manque dans le cache, faire un appel API pour les deux
-            tracing::info!("Appel API EDF nécessaire pour les dates: {} et {}", today_str, tomorrow_str);
-            
-            match edf_api::fetch_tempo_calendar(&today_str, &tomorrow_str).await {
-                Ok(calendar_entries) => {
-                    // Insérer toutes les entrées dans le cache
-                    cache::insert_multiple_into_cache(&cache, calendar_entries.clone()).await;
-                    
-                    // Extraire les statuts pour aujourd'hui et demain
-                    let today_status = calendar_entries
-                        .iter()
-                        .find(|(d, _)| d == &today_str)
-                        .map(|(_, status)| *status);
-                    
-                    let tomorrow_status = calendar_entries
-                        .iter()
-                        .find(|(d, _)| d == &tomorrow_str)
-                        .map(|(_, status)| *status);
-                    
-                    match (today_status, tomorrow_status) {
-                        (Some(today_status), Some(tomorrow_status)) => (
-                            StatusCode::OK,
-                            Json(CalendarFullResponse {
-                                today: CalendarResponse {
-                                    date: today_str,
-                                    statut: today_status,
-                                },
-                                tomorrow: CalendarResponse {
-                                    date: tomorrow_str,
-                                    statut: tomorrow_status,
-                                },
-                            }),
-                        )
-                            .into_response(),
-                        _ => (
-                            StatusCode::BAD_REQUEST,
-                            Json(ErrorResponse {
-                                message: "Dates non trouvées dans la réponse API".to_string(),
-                            }),
-                        )
-                            .into_response(),
-                    }
-                }
-                Err(error) => (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        message: error,
-                    }),
-                )
-                    .into_response(),
-            }
-        }
+    // Récupérer les statuts pour aujourd'hui et demain en une seule opération
+    match tempo_service::get_tempo_status_for_today_and_tomorrow(&cache).await {
+        Ok((today_status, tomorrow_status)) => (
+            StatusCode::OK,
+            Json(CalendarFullResponse {
+                today: CalendarResponse {
+                    date: today_str,
+                    statut: today_status,
+                },
+                tomorrow: CalendarResponse {
+                    date: tomorrow_str,
+                    statut: tomorrow_status,
+                },
+            }),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                message: error,
+            }),
+        )
+            .into_response(),
     }
 }
 
@@ -197,10 +145,10 @@ async fn calendar_full(
 async fn calendar_tomorrow(
     axum::extract::State(cache): axum::extract::State<cache::TempoCache>
 ) -> impl IntoResponse {
-    let tomorrow = Local::now() + chrono::Duration::days(1);
+    let tomorrow = Local::now().date_naive() + chrono::Duration::days(1);
     let tomorrow_str = tomorrow.format("%Y-%m-%d").to_string();
 
-    match tempo_service::get_tempo_status_for_date(&cache, &tomorrow_str).await {
+    match tempo_service::get_tempo_status_for_date(&cache, tomorrow).await {
         Ok(status) => (
             StatusCode::OK,
             Json(CalendarResponse {

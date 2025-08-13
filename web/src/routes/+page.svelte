@@ -90,13 +90,13 @@
                 >
                     <div class="date-header">
                         <h2>Aujourd'hui</h2>
-                        <div class="tempo-badge">
-                            {getTempoName(calendarData.today.statut)}
-                        </div>
                     </div>
                     <div class="date-content">
                         <div class="current-date">
                             {formatDate(calendarData.today.date)}
+                        </div>
+                        <div class="tempo-badge">
+                            {getTempoName(calendarData.today.statut)}
                         </div>
                     </div>
                 </div>
@@ -108,14 +108,19 @@
                 >
                     <div class="date-header">
                         <h2>Demain</h2>
-                        <div class="tempo-badge">
-                            {getTempoName(calendarData.tomorrow.statut)}
-                        </div>
                     </div>
                     <div class="date-content">
                         <div class="current-date">
                             {formatDate(calendarData.tomorrow.date)}
                         </div>
+                        <div class="tempo-badge">
+                            {getTempoName(calendarData.tomorrow.statut)}
+                        </div>
+                        {#if calendarData.tomorrow.statut === "NON_DEFINI"}
+                            <div class="tempo-info">
+                                Disponible à partir de 11h
+                            </div>
+                        {/if}
                     </div>
                 </div>
             {:catch error}
@@ -278,7 +283,7 @@
     .date-header h2 {
         color: #2d3748;
         font-size: 1.25rem;
-        margin: 0 0 1.5rem 0;
+        margin: 0 0 0.5rem 0;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 1px;
@@ -286,23 +291,39 @@
     }
 
     .current-date {
-        font-size: 1.75rem;
+        font-size: 1.3rem;
         font-weight: 600;
-        color: #1a202c;
+        color: #2d3748;
         text-transform: capitalize;
         line-height: 1.3;
+        margin-bottom: 1rem;
+    }
+
+    .tempo-info {
+        font-size: 0.9rem;
+        color: #718096;
+        margin-top: 0.5rem;
+        font-style: italic;
     }
 
     .tempo-badge {
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.95);
         color: #1a202c;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 600;
-        margin-top: 0.5rem;
+        padding: 0.8rem 1.4rem;
+        border-radius: 14px;
+        font-size: 1.15rem;
+        font-weight: 650;
         display: inline-block;
-        border: 1px solid rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+        text-transform: capitalize;
+        letter-spacing: 0.3px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .tempo-badge:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
     }
 
     .loading-card,

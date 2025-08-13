@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use chrono::NaiveDate;
 
 use crate::server::TempoStatus;
 
@@ -25,10 +26,13 @@ struct CalendarDay {
     statut: String,
 }
 
-pub async fn fetch_tempo_calendar(today: &str, tomorrow: &str) -> Result<Vec<(String, TempoStatus)>, String> {
+pub async fn fetch_tempo_calendar(start_date: NaiveDate, end_date: NaiveDate) -> Result<Vec<(String, TempoStatus)>, String> {
+    let start_date_str = start_date.format("%Y-%m-%d").to_string();
+    let end_date_str = end_date.format("%Y-%m-%d").to_string();
+    
     let url = format!(
         "https://api-commerce.edf.fr/commerce/activet/v1/calendrier-jours-effacement?option=TEMPO&dateApplicationBorneInf={}&dateApplicationBorneSup={}&identifiantConsommateur=src",
-        today, tomorrow
+        start_date_str, end_date_str
     );
 
     let client = reqwest::Client::new();
