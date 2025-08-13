@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build the web interface first
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build web interface
+        run: npm run build
+        working-directory: web
+
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: web/build/
+
+  # Build binaries for multiple platforms
+  build:
+    needs: build-web
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: tempo-proxy-linux-amd64
+
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: tempo-proxy-linux-amd64-musl
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: tempo-proxy-linux-arm64
+
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: tempo-proxy-macos-amd64
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: tempo-proxy-macos-arm64
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: tempo-proxy-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download web build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: web/build/
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+          
+      - name: Configure cross compilation (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cp target/${{ matrix.target }}/release/tempo-proxy ${{ matrix.name }}
+          chmod +x ${{ matrix.name }}
+
+      - name: Prepare binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cp target/${{ matrix.target }}/release/tempo-proxy.exe ${{ matrix.name }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  # Create GitHub release
+  release:
+    needs: [build-web, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
+          files: |
+            artifacts/tempo-proxy-linux-amd64/tempo-proxy-linux-amd64
+            artifacts/tempo-proxy-linux-amd64-musl/tempo-proxy-linux-amd64-musl
+            artifacts/tempo-proxy-linux-arm64/tempo-proxy-linux-arm64
+            artifacts/tempo-proxy-macos-amd64/tempo-proxy-macos-amd64
+            artifacts/tempo-proxy-macos-arm64/tempo-proxy-macos-arm64
+            artifacts/tempo-proxy-windows-amd64.exe/tempo-proxy-windows-amd64.exe
+          body: |
+            ## Installation
+
+            ### Linux
+            ```bash
+            # AMD64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-linux-amd64
+            chmod +x tempo-proxy-linux-amd64
+            sudo mv tempo-proxy-linux-amd64 /usr/local/bin/tempo-proxy
+
+            # ARM64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-linux-arm64
+            chmod +x tempo-proxy-linux-arm64
+            sudo mv tempo-proxy-linux-arm64 /usr/local/bin/tempo-proxy
+            ```
+
+            ### macOS
+            ```bash
+            # Intel Mac
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-macos-amd64
+            chmod +x tempo-proxy-macos-amd64
+            sudo mv tempo-proxy-macos-amd64 /usr/local/bin/tempo-proxy
+
+            # Apple Silicon Mac
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tempo-proxy-macos-arm64
+            chmod +x tempo-proxy-macos-arm64
+            sudo mv tempo-proxy-macos-arm64 /usr/local/bin/tempo-proxy
+            ```
+
+            ### Windows
+            Download `tempo-proxy-windows-amd64.exe` and place it in your PATH.
+
+            ## Usage
+            ```bash
+            tempo-proxy serve --interface 127.0.0.1:8080
+            ```
+
+            Then open http://127.0.0.1:8080 in your browser.

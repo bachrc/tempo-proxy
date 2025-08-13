@@ -1,0 +1,19 @@
+# Cross-compilation configuration
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+
+# Optimization settings for releases
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Development profile
+[profile.dev]
+opt-level = 0
+debug = true
