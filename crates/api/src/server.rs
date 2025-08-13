@@ -1,5 +1,5 @@
 use anyhow::Context;
-use axum::{Json, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{Json, http::StatusCode, response::IntoResponse, routing::get, extract::Path, http::header, response::Response, body::Body};
 use chrono::Local;
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -9,6 +9,9 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_rapidoc::RapiDoc;
 
 use crate::{cache, tempo_service};
+use include_dir::{include_dir, Dir};
+
+static WEB_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/build");
 
 #[derive(Debug, Serialize, ToSchema, Clone, Copy)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -81,6 +84,44 @@ async fn calendar_today(
     }
 }
 
+fn get_mime_type(path: &str) -> &'static str {
+    match std::path::Path::new(path).extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html",
+        Some("css") => "text/css",
+        Some("js") => "application/javascript",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("svg") => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn serve_static(uri: axum::http::Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+
+    match WEB_DIR.get_file(path) {
+        Some(file) => Response::builder()
+            .header(header::CONTENT_TYPE, get_mime_type(path))
+            .body(Body::from(file.contents()))
+            .unwrap(),
+        None => {
+            // Pour les routes SPA, fallback vers index.html
+            match WEB_DIR.get_file("index.html") {
+                Some(file) => Response::builder()
+                    .header(header::CONTENT_TYPE, "text/html")
+                    .body(Body::from(file.contents()))
+                    .unwrap(),
+                None => Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::from("Not found"))
+                    .unwrap(),
+            }
+        }
+    }
+}
+
 pub async fn run(interface: &str) -> Result<(), anyhow::Error> {
     let cache = cache::create_cache();
     
@@ -92,7 +133,8 @@ pub async fn run(interface: &str) -> Result<(), anyhow::Error> {
     let router = router
         .with_state(cache)
         .route("/openapi.json", get(move || async { Json(api) }))
-        .merge(RapiDoc::new("/openapi.json").path("/rapidoc"));
+        .merge(RapiDoc::new("/openapi.json").path("/rapidoc"))
+        .fallback(serve_static);
 
     let addr: SocketAddr = interface
         .parse()
