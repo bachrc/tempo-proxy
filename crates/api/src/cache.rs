@@ -26,7 +26,14 @@ pub async fn get_from_cache(cache: &TempoCache, date: &str) -> Option<TempoStatu
 pub async fn insert_multiple_into_cache(cache: &TempoCache, entries: Vec<(String, TempoStatus)>) {
     let mut cache_write = cache.write().await;
     for (date, status) in entries {
-        tracing::info!("Ajout au cache: {} -> {:?}", date, status);
-        cache_write.insert(date, status);
+        match status {
+            TempoStatus::NonDefini => {
+                tracing::info!("Statut NON_DEFINI pour {}, pas de mise en cache", date);
+            }
+            _ => {
+                tracing::info!("Ajout au cache: {} -> {:?}", date, status);
+                cache_write.insert(date, status);
+            }
+        }
     }
 }

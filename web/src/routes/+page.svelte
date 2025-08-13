@@ -1,21 +1,60 @@
-<script>
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
+<script lang="ts">
+    interface CalendarResponse {
+        date: string;
+        statut: "TEMPO_BLEU" | "TEMPO_BLANC" | "TEMPO_ROUGE" | "NON_DEFINI";
+    }
 
-    const currentDate = today.toLocaleDateString("fr-FR", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-    });
+    interface CalendarData {
+        today: CalendarResponse;
+        tomorrow: CalendarResponse;
+    }
 
-    const tomorrowDate = tomorrow.toLocaleDateString("fr-FR", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-    });
+    async function fetchCalendarData(): Promise<CalendarData> {
+        const res = await fetch("/calendar");
+        return await res.json();
+    }
+
+    // Promise pour les données du calendrier
+    let calendarPromise: Promise<CalendarData> = $state(fetchCalendarData());
+
+    // Fonction pour formater une date ISO en français
+    function formatDate(dateString: string): string {
+        const date = new Date(dateString);
+        return date.toLocaleDateString("fr-FR", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+        });
+    }
+
+    // Fonction pour obtenir la classe CSS selon le statut Tempo
+    function getTempoClass(status: CalendarResponse["statut"]): string {
+        switch (status) {
+            case "TEMPO_BLEU":
+                return "tempo-bleu";
+            case "TEMPO_BLANC":
+                return "tempo-blanc";
+            case "TEMPO_ROUGE":
+                return "tempo-rouge";
+            case "NON_DEFINI":
+                return "tempo-non-defini";
+        }
+    }
+
+    // Fonction pour obtenir le nom français du statut
+    function getTempoName(status: CalendarResponse["statut"]): string {
+        switch (status) {
+            case "TEMPO_BLEU":
+                return "Tempo Bleu";
+            case "TEMPO_BLANC":
+                return "Tempo Blanc";
+            case "TEMPO_ROUGE":
+                return "Tempo Rouge";
+            case "NON_DEFINI":
+                return "Non Défini";
+        }
+    }
 </script>
 
 <svelte:head>
@@ -41,23 +80,49 @@
 
     <section class="date-section">
         <div class="dates-container">
-            <div class="date-card">
-                <div class="date-header">
-                    <h2>Aujourd'hui</h2>
+            {#await calendarPromise}
+                <div class="loading-card">
+                    <p>Chargement des données...</p>
                 </div>
-                <div class="date-content">
-                    <div class="current-date">{currentDate}</div>
+            {:then calendarData}
+                <div
+                    class="date-card {getTempoClass(calendarData.today.statut)}"
+                >
+                    <div class="date-header">
+                        <h2>Aujourd'hui</h2>
+                        <div class="tempo-badge">
+                            {getTempoName(calendarData.today.statut)}
+                        </div>
+                    </div>
+                    <div class="date-content">
+                        <div class="current-date">
+                            {formatDate(calendarData.today.date)}
+                        </div>
+                    </div>
                 </div>
-            </div>
 
-            <div class="date-card">
-                <div class="date-header">
-                    <h2>Demain</h2>
+                <div
+                    class="date-card {getTempoClass(
+                        calendarData.tomorrow.statut,
+                    )}"
+                >
+                    <div class="date-header">
+                        <h2>Demain</h2>
+                        <div class="tempo-badge">
+                            {getTempoName(calendarData.tomorrow.statut)}
+                        </div>
+                    </div>
+                    <div class="date-content">
+                        <div class="current-date">
+                            {formatDate(calendarData.tomorrow.date)}
+                        </div>
+                    </div>
                 </div>
-                <div class="date-content">
-                    <div class="current-date">{tomorrowDate}</div>
+            {:catch error}
+                <div class="error-card">
+                    <p>Erreur lors du chargement: {error.message}</p>
                 </div>
-            </div>
+            {/await}
         </div>
     </section>
 
@@ -228,6 +293,36 @@
         line-height: 1.3;
     }
 
+    .tempo-badge {
+        background: rgba(255, 255, 255, 0.9);
+        color: #1a202c;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-top: 0.5rem;
+        display: inline-block;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .loading-card,
+    .error-card {
+        grid-column: 1 / -1;
+        background: white;
+        border-radius: 20px;
+        box-shadow:
+            0 4px 20px rgba(0, 0, 0, 0.05),
+            0 1px 3px rgba(0, 0, 0, 0.1);
+        padding: 3rem 2rem;
+        text-align: center;
+        border: 1px solid #e2e8f0;
+    }
+
+    .error-card {
+        border-left: 4px solid #e53e3e;
+        color: #c53030;
+    }
+
     .info-section {
         background: white;
         padding: 5rem 2rem;
@@ -281,6 +376,14 @@
 
     .tempo-rouge::before {
         background: linear-gradient(135deg, #e53e3e 0%, #fc8181 100%);
+    }
+
+    .tempo-non-defini {
+        background: #f5f5f5;
+    }
+
+    .tempo-non-defini::before {
+        background: linear-gradient(135deg, #9e9e9e 0%, #bdbdbd 100%);
     }
 
     .info-card h3 {
