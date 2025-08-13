@@ -95,6 +95,8 @@ jobs:
 
   build-docker:
     name: Build Docker Images
+    if: ${{ github.actor != 'github-actions[bot]' && github.event_name != 'push' || github.event.pusher.name != 'github-actions[bot]' }}
+
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
